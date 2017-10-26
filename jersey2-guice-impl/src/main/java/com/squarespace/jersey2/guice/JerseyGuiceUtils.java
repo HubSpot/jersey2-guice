@@ -62,58 +62,58 @@ import com.google.inject.spi.ElementSource;
 
 /**
  * An utility class to bootstrap HK2's {@link ServiceLocator}s and {@link Guice}'s {@link Injector}s.
- * 
+ *
  * @see ServiceLocator
  * @see Injector
  */
 public class JerseyGuiceUtils {
-  
+
   private static final Logger LOG = LoggerFactory.getLogger(JerseyGuiceUtils.class);
-  
+
   private static final String MODIFIERS_FIELD = "modifiers";
-  
+
   private static final String PREFIX = "GuiceServiceLocator-";
-  
+
   private static final AtomicInteger NTH = new AtomicInteger();
-  
+
   private static boolean SPI_CHECKED = false;
-  
+
   private static boolean SPI_PRESENT = false;
-  
+
   private JerseyGuiceUtils() {}
-  
+
   /**
    * Installs the given {@link Injector}.
-   * 
+   *
    * @see JerseyGuiceModule
    */
   public static void install(Injector injector) {
     // This binding is provided by JerseyGuiceModule
     ServiceLocator locator = injector.getInstance(ServiceLocator.class);
-    
+
     GuiceServiceLocatorGenerator generator = getOrCreateGuiceServiceLocatorGenerator();
     generator.add(locator);
   }
-  
+
   /**
-   * Installs a {@link ServiceLocatorGenerator} instead of an {@link Injector}. This 
+   * Installs a {@link ServiceLocatorGenerator} instead of an {@link Injector}. This
    * is mostly needed for testing and bootstrapping.
-   * 
+   *
    * @see #install(Injector)
    */
   public static void install(ServiceLocatorGenerator delegate) {
     GuiceServiceLocatorGenerator generator = getOrCreateGuiceServiceLocatorGenerator();
     generator.delegate(delegate);
   }
-  
+
   /**
-   * 
+   *
    */
   public static void reset() {
     GuiceServiceLocatorGenerator generator = getOrCreateGuiceServiceLocatorGenerator();
     generator.reset();
   }
-  
+
   private static synchronized GuiceServiceLocatorGenerator getOrCreateGuiceServiceLocatorGenerator() {
     // Use SPI
     if (isProviderPresent()) {
@@ -124,7 +124,7 @@ public class JerseyGuiceUtils {
       }
       return generator;
     }
-    
+
     // Use Reflection
     GuiceServiceLocatorFactory factory = getOrCreateFactory();
     if (factory != null) {
@@ -133,56 +133,56 @@ public class JerseyGuiceUtils {
         generator = new GuiceServiceLocatorGenerator();
         factory.install(generator);
       }
-      
+
       return generator;
     }
-    
+
     throw new IllegalStateException();
   }
-  
+
   /**
    * Returns {@code true} if jersey2-guice SPI is present.
    */
   private static synchronized boolean isProviderPresent() {
-    
+
     if (!SPI_CHECKED) {
       SPI_CHECKED = true;
-      
+
       ServiceLocatorGenerator generator = lookupSPI();
       if (generator instanceof GuiceServiceLocatorGeneratorStub) {
         SPI_PRESENT = true;
-        
+
       }
-      
+
       if (!SPI_PRESENT) {
         LOG.warn("It appears jersey2-guice-spi is either not present or in conflict with some other Jar: {}", generator);
       }
     }
-    
+
     return SPI_PRESENT;
   }
-  
+
   private static ServiceLocatorGenerator lookupSPI() {
     return AccessController.doPrivileged(new PrivilegedAction<ServiceLocatorGenerator>() {
       @Override
       public ServiceLocatorGenerator run() {
         try {
           ClassLoader classLoader = JerseyGuiceUtils.class.getClassLoader();
-          ServiceLoader<ServiceLocatorGenerator> providers 
+          ServiceLoader<ServiceLocatorGenerator> providers
               = ServiceLoader.load(ServiceLocatorGenerator.class, classLoader);
-          
+
           for (ServiceLocatorGenerator generator : providers) {
             return generator;
           }
         } catch (Throwable th) {
           LOG.warn("Exception", th);
         }
-        
+
         return null;
       }
     });
   }
-  
+
   /**
    * @see ServiceLocatorFactory
    */
@@ -191,143 +191,143 @@ public class JerseyGuiceUtils {
     if (factory instanceof GuiceServiceLocatorFactory) {
       return (GuiceServiceLocatorFactory)factory;
     }
-    
+
     if (LOG.isInfoEnabled()) {
       LOG.info("Attempting to install (using relfection) a Guice-aware ServiceLocatorFactory...");
     }
-    
+
     try {
-      GuiceServiceLocatorFactory guiceServiceLocatorFactory 
+      GuiceServiceLocatorFactory guiceServiceLocatorFactory
           = new GuiceServiceLocatorFactory(factory);
-      
+
       Class<?> clazz = ServiceLocatorFactory.class;
       Field field = clazz.getDeclaredField("INSTANCE");
-      
+
       set(field, null, guiceServiceLocatorFactory);
-      
+
       return guiceServiceLocatorFactory;
     } catch (Exception err) {err.printStackTrace();
       LOG.error("Exception", err);
     }
-    
+
     return null;
   }
-  
+
   /**
    * @see #newServiceLocator(String, ServiceLocator)
    */
   public static ServiceLocator newServiceLocator() {
     return newServiceLocator(null);
   }
-  
+
   /**
    * @see #newServiceLocator(String, ServiceLocator)
    */
   public static ServiceLocator newServiceLocator(String name) {
     return newServiceLocator(name, null);
   }
-  
+
   /**
    * Creates and returns a {@link ServiceLocator}.
-   * 
+   *
    * NOTE: This code should be very similar to HK2's own {@link ServiceLocatorGeneratorImpl}.
    */
   public static ServiceLocator newServiceLocator(String name, ServiceLocator parent) {
     if (parent != null && !(parent instanceof ServiceLocatorImpl)) {
       throw new IllegalArgumentException("name=" + name + ", parent=" + parent);
     }
-    
+
     if (name == null) {
       name = PREFIX;
     }
-    
+
     if (name.endsWith("-")) {
       name += NTH.incrementAndGet();
     }
-    
+
     GuiceServiceLocator locator = new GuiceServiceLocator(name, parent);
-    
+
     DynamicConfigurationImpl config = new DynamicConfigurationImpl(locator);
-    
+
     config.bind(Utilities.getLocatorDescriptor(locator));
-    
-    ActiveDescriptor<InjectionResolver<javax.inject.Inject>> threeThirtyResolver 
+
+    ActiveDescriptor<InjectionResolver<javax.inject.Inject>> threeThirtyResolver
       = newThreeThirtyInjectionResolverDescriptor(locator);
-    
+
     config.addActiveDescriptor(threeThirtyResolver);
     config.addActiveDescriptor(newGuiceInjectionResolverDescriptor(
         locator, threeThirtyResolver));
-    
+
     config.bind(BuilderHelper.link(DynamicConfigurationServiceImpl.class, false).
             to(DynamicConfigurationService.class).
             in(Singleton.class.getName()).
             localOnly().
             build());
-    
+
     config.bind(BuilderHelper.createConstantDescriptor(
             new DefaultClassAnalyzer(locator)));
-    
+
     config.bind(BuilderHelper.createDescriptorFromClass(ServiceLocatorRuntimeImpl.class));
-    
+
     config.bind(BuilderHelper.createConstantDescriptor(
         new InstantiationServiceImpl()));
-    
+
     config.commit();
     return locator;
   }
-  
+
   /**
    * This method links the {@link Injector} to the {@link ServiceLocator}.
    */
   public static ServiceLocator link(ServiceLocator locator, Injector injector) {
-    
+
     Map<Key<?>, Binding<?>> bindings = gatherBindings(injector);
     Set<Binder> binders = toBinders(bindings);
-    
+
     return link(locator, injector, binders);
   }
-  
+
   /**
    * Gathers Guice {@link Injector} bindings over the hierarchy.
    */
   private static Map<Key<?>, Binding<?>> gatherBindings(Injector injector) {
-      
+
     Map<Key<?>, Binding<?>> dst = new HashMap<Key<?>, Binding<?>>();
-    
+
     Injector current = injector;
     while (current != null) {
       dst.putAll(current.getBindings());
       current = current.getParent();
     }
-    
+
     return dst;
   }
-  
+
   /**
    * @see #link(ServiceLocator, Injector)
    * @see #newChildInjector(Injector, ServiceLocator)
    */
-  private static ServiceLocator link(ServiceLocator locator, 
+  private static ServiceLocator link(ServiceLocator locator,
       Injector injector, Iterable<? extends Binder> binders) {
-    
+
     DynamicConfigurationService dcs = locator.getService(DynamicConfigurationService.class);
     DynamicConfiguration dc = dcs.createDynamicConfiguration();
-    
+
     GuiceJustInTimeResolver resolver = new GuiceJustInTimeResolver(locator, injector);
     dc.bind(BuilderHelper.createConstantDescriptor(resolver));
-    
+
     dc.addActiveDescriptor(GuiceScopeContext.class);
-    
+
     bind(locator, dc, new MessagingBinders.HeaderDelegateProviders());
-    
+
     for (Binder binder : binders) {
       bind(locator, dc, binder);
     }
-    
+
     dc.commit();
     return locator;
   }
-  
+
   /**
    * @see ServiceLocator#inject(Object)
    * @see Binder#bind(DynamicConfiguration)
@@ -336,34 +336,39 @@ public class JerseyGuiceUtils {
     locator.inject(binder);
     binder.bind(dc);
   }
-  
+
   /**
    * Turns the given Guice {@link Binding}s into HK2 {@link Binder}s.
    */
   @SuppressWarnings({ "unchecked", "rawtypes" })
   private static Set<Binder> toBinders(Map<Key<?>, Binding<?>> bindings) {
     Set<Binder> binders = new HashSet<>();
-    
+
     for (Map.Entry<Key<?>, Binding<?>> entry : bindings.entrySet()) {
       Key<?> key = entry.getKey();
       Binding<?> binding = entry.getValue();
-      
+
       Object source = binding.getSource();
       if (!(source instanceof ElementSource)) {
-        
+
         // Things like the Injector itself don't have an ElementSource.
         if (LOG.isTraceEnabled()) {
           LOG.trace("Adding binding: key={}, source={}", key, source);
         }
-        
+
         binders.add(new GuiceBinder(key, binding));
         continue;
       }
-      
+
       ElementSource element = (ElementSource)source;
+      // Check original source so that we can support elements that
+      // may have been written to the binder via Element#applyTo
+      while (element.getOriginalElementSource() != null) {
+        element = element.getOriginalElementSource();
+      }
       List<String> names = element.getModuleClassNames();
       String name = names.get(0);
-      
+
       // Skip everything that is declared in a JerseyModule
       try {
 
@@ -381,7 +386,7 @@ public class JerseyGuiceUtils {
           if (LOG.isTraceEnabled()) {
             LOG.trace("Ignoring binding {} in {}", key, module);
           }
-          
+
           continue;
         }
       } catch (ClassNotFoundException err) {
@@ -393,16 +398,16 @@ public class JerseyGuiceUtils {
           LOG.warn("Unavailable to load class in order to validate module: name={}", name);
         }
       }
-      
+
       binders.add(new GuiceBinder(key, binding));
     }
-    
+
     return binders;
   }
-  
+
   private static void set(Field field, Object instance, Object value) throws  IllegalAccessException, NoSuchFieldException, SecurityException {
     field.setAccessible(true);
-    
+
     int modifiers = field.getModifiers();
     if (Modifier.isFinal(modifiers)) {
       setModifiers(field, modifiers & ~Modifier.FINAL);
@@ -415,7 +420,7 @@ public class JerseyGuiceUtils {
       field.set(instance, value);
     }
   }
-  
+
   private static void setModifiers(Field dst, int modifiers) throws IllegalAccessException, NoSuchFieldException, SecurityException {
     Field field = Field.class.getDeclaredField(MODIFIERS_FIELD);
     field.setAccessible(true);
