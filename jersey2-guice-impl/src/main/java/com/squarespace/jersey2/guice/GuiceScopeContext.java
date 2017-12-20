@@ -21,10 +21,14 @@ import java.lang.annotation.Annotation;
 import org.glassfish.hk2.api.ActiveDescriptor;
 import org.glassfish.hk2.api.Context;
 import org.glassfish.hk2.api.ServiceHandle;
+import org.glassfish.hk2.utilities.AbstractActiveDescriptor;
 import org.jvnet.hk2.annotations.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 class GuiceScopeContext implements Context<GuiceScope> {
+  private static final Logger LOG = LoggerFactory.getLogger(AbstractActiveDescriptor.class);
 
   @Override
   public Class<? extends Annotation> getScope() {
@@ -33,6 +37,10 @@ class GuiceScopeContext implements Context<GuiceScope> {
 
   @Override
   public <U> U findOrCreate(ActiveDescriptor<U> descriptor, ServiceHandle<?> root) {
+    if (descriptor.getImplementation().contains("StevesSpecialClass")) {
+      LOG.info("findingOrCreating StevesSpecialClass with\n\tdescriptor={}\n\troot={}\n\tdescriptor.qualifierAnnotations={}",
+               descriptor, root, descriptor.getQualifierAnnotations());
+    }
     return descriptor.create(root);
   }
 

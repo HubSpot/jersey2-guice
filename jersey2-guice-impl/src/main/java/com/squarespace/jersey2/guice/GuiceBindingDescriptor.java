@@ -29,6 +29,8 @@ import org.glassfish.hk2.api.DescriptorType;
 import org.glassfish.hk2.api.DescriptorVisibility;
 import org.glassfish.hk2.api.ServiceHandle;
 import org.glassfish.hk2.utilities.AbstractActiveDescriptor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Binding;
 import com.google.inject.Guice;
@@ -37,6 +39,7 @@ import com.google.inject.Guice;
  * An {@link ActiveDescriptor} that is backed by a {@link Guice} {@link Binding}.
  */
 class GuiceBindingDescriptor<T> extends AbstractActiveDescriptor<T> {
+  private static final Logger LOG = LoggerFactory.getLogger(AbstractActiveDescriptor.class);
 
   private final Class<?> clazz;
 
@@ -54,6 +57,11 @@ class GuiceBindingDescriptor<T> extends AbstractActiveDescriptor<T> {
     this.binding = binding;
 
     setImplementation(clazz.getName());
+
+    if (clazz.getName().contains("StevesSpecialClass")) {
+      LOG.info("Creating GuiceBindingDescriptor with\n\ttype={}\n\tclazz={}\n\tqualifiers={}\n\tbinding={}",
+               type, clazz, qualifiers, binding);
+    }
   }
 
   @Override
@@ -100,7 +108,7 @@ class GuiceBindingDescriptor<T> extends AbstractActiveDescriptor<T> {
             break;
           }
         }
-        
+
         if(!matched) {
           return false;
         }
