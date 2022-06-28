@@ -80,6 +80,7 @@ class GuiceBinder<T> extends AbstractBinder {
     
     Set<Annotation> qualifiers = BindingUtils.getQualifiers(key);
 
+    System.out.println(String.format("Binding key %s", key));
     if (clazz.isAnnotationPresent(BindAsHK2Singleton.class)) {
       System.out.println(String.format("Binding key %s as singleton", key));
       return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding, javax.inject.Singleton.class);
