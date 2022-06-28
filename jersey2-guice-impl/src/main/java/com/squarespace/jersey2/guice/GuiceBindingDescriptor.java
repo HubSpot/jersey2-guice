@@ -43,8 +43,13 @@ class GuiceBindingDescriptor<T> extends AbstractActiveDescriptor<T> {
   private final Binding<T> binding;
 
   public GuiceBindingDescriptor(Type type, Class<?> clazz,
-      Set<Annotation> qualifiers, Binding<T> binding) {
-    super(Collections.singleton(type), GuiceScope.class,
+                                Set<Annotation> qualifiers, Binding<T> binding) {
+    this(type, clazz, qualifiers, binding, GuiceScope.class);
+  }
+
+  public GuiceBindingDescriptor(Type type, Class<?> clazz,
+      Set<Annotation> qualifiers, Binding<T> binding, Class<? extends Annotation> scope) {
+    super(Collections.singleton(type), scope,
         BindingUtils.getNameFromAllQualifiers(qualifiers, clazz),
         qualifiers, DescriptorType.CLASS, DescriptorVisibility.NORMAL,
         0, false, (Boolean)null, (String)null,

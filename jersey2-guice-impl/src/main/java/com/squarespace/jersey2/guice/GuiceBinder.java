@@ -79,7 +79,11 @@ class GuiceBinder<T> extends AbstractBinder {
     Class<?> clazz = typeLiteral.getRawType();
     
     Set<Annotation> qualifiers = BindingUtils.getQualifiers(key);
-    
-    return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding);
+
+    if (clazz.isAnnotationPresent(BindAsHK2Singleton.class)) {
+      return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding, javax.inject.Singleton.class);
+    } else {
+      return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding);
+    }
   }
 }
