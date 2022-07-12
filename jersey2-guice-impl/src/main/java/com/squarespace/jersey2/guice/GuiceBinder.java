@@ -20,6 +20,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 import java.util.Set;
 
+import org.glassfish.hk2.api.InterceptionService;
 import org.glassfish.hk2.utilities.Binder;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
 
@@ -79,7 +80,11 @@ class GuiceBinder<T> extends AbstractBinder {
     Class<?> clazz = typeLiteral.getRawType();
     
     Set<Annotation> qualifiers = BindingUtils.getQualifiers(key);
-    
-    return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding);
+
+    if (InterceptionService.class.equals(clazz)) {
+      return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding, javax.inject.Singleton.class);
+    } else {
+      return new GuiceBindingDescriptor<>(type, clazz, qualifiers, binding);
+    }
   }
 }
