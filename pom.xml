@@ -8,9 +8,9 @@
   <packaging>pom</packaging>
 
   <properties>
-    <project.guiceVersion>4.0</project.guiceVersion>
-    <project.jerseyVersion>2.22.2</project.jerseyVersion>
-    <project.hk2Version>2.4.0-b34</project.hk2Version>
+    <project.guiceVersion>6.0.0</project.guiceVersion>
+    <project.jerseyVersion>2.25.1</project.jerseyVersion>
+    <project.hk2Version>2.5.0-b32</project.hk2Version>
   </properties>
 
   <modules>
