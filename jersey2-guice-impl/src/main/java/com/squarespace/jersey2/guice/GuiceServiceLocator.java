@@ -160,7 +160,8 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
         return;
       }
 
-      LOG.info("Registering the remaining {} Guice binding types in HK2 for a lookup that isn't by type", names.size());
+      LOG.info("Registering the remaining {} Guice binding types in HK2 for a lookup that isn't by type",
+          names.size(), new Throwable("The lookup"));
       List<Binder> binders = new ArrayList<>();
       for (String name : names) {
         checkPrecedence(name);
