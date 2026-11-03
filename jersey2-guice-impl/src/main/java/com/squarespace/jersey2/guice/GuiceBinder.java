@@ -49,6 +49,10 @@ class GuiceBinder<T> extends AbstractBinder {
     bind(newDescriptor(key, binding));
   }
   
+  String getRawTypeName() {
+    return key.getTypeLiteral().getRawType().getName();
+  }
+
   @Override
   public int hashCode() {
     return key.hashCode();

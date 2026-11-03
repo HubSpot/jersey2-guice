@@ -73,6 +73,11 @@ class GuiceServiceLocatorGenerator implements ServiceLocatorGenerator {
       }
     }
     
+    // HK2 resolves a child's lookups through its parent's private methods.
+    if (parent instanceof GuiceServiceLocator) {
+      ((GuiceServiceLocator)parent).bindAll();
+    }
+
     return generator.create(name, parent);
   }
 }

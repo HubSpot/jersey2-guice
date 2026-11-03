@@ -23,6 +23,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -320,12 +321,39 @@ public class JerseyGuiceUtils {
 
     bind(locator, dc, new MessagingBinders.HeaderDelegateProviders());
 
+    Map<String, List<Binder>> lazy = new HashMap<>();
     for (Binder binder : binders) {
-      bind(locator, dc, binder);
+      if (binder instanceof GuiceBinder<?>) {
+        String name = ((GuiceBinder<?>)binder).getRawTypeName();
+        if (locator instanceof GuiceServiceLocator && !isBoundEagerly(name)) {
+          lazy.computeIfAbsent(name, k -> new ArrayList<>()).add(binder);
+        } else {
+          binder.bind(dc);
+        }
+      } else {
+        bind(locator, dc, binder);
+      }
     }
 
     dc.commit();
+
+    if (!lazy.isEmpty()) {
+      ((GuiceServiceLocator)locator).bindLazily(lazy);
+    }
+
     return locator;
+  }
+
+  /**
+   * HK2 looks up its own SPI types while holding its write lock, and Jersey registers
+   * descriptors for JAX-RS, servlet and its own types after linking, which a lazily
+   * registered Guice binding would lose precedence to.
+   */
+  private static boolean isBoundEagerly(String name) {
+    return name.startsWith("org.glassfish.")
+        || name.startsWith("org.jvnet.hk2.")
+        || name.startsWith("javax.ws.rs.")
+        || name.startsWith("javax.servlet.");
   }
 
   /**
@@ -343,6 +371,7 @@ public class JerseyGuiceUtils {
   @SuppressWarnings({ "unchecked", "rawtypes" })
   private static Set<Binder> toBinders(Map<Key<?>, Binding<?>> bindings) {
     Set<Binder> binders = new HashSet<>();
+    Map<String, Boolean> jerseyModules = new HashMap<>();
 
     for (Map.Entry<Key<?>, Binding<?>> entry : bindings.entrySet()) {
       Key<?> key = entry.getKey();
@@ -370,39 +399,49 @@ public class JerseyGuiceUtils {
       String name = names.get(0);
 
       // Skip everything that is declared in a JerseyModule
-      try {
+      Boolean jerseyModule = jerseyModules.get(name);
+      if (jerseyModule == null) {
+        jerseyModule = isJerseyModule(name);
+        jerseyModules.put(name, jerseyModule);
+      }
 
-        Class<?> module;
-
-        // Attempt to load the classes via the context class loader first, in order to support
-        // environments that enforce tighter constraints on class loading (such as in an OSGi container)
-        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-        if(classLoader != null) {
-          module = classLoader.loadClass(name);
-        } else {
-          module = Class.forName(name);
+      if (jerseyModule) {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Ignoring binding {} in {}", key, name);
         }
-        if (JerseyModule.class.isAssignableFrom(module)) {
-          if (LOG.isTraceEnabled()) {
-            LOG.trace("Ignoring binding {} in {}", key, module);
-          }
-
-          continue;
-        }
-      } catch (ClassNotFoundException err) {
-        // Some modules may not be able to be instantiated directly here as a class if we're running
-        // in a container that enforcer tighter class loader constraints (such as the
-        // org.ops4j.peaberry.osgi.OSGiModule Guice module when running in an OSGi container),
-        // so we're only logging a warning here instead of throwing a hard exception
-        if (LOG.isWarnEnabled()) {
-          LOG.warn("Unavailable to load class in order to validate module: name={}", name);
-        }
+        continue;
       }
 
       binders.add(new GuiceBinder(key, binding));
     }
 
     return binders;
+  }
+
+  private static boolean isJerseyModule(String name) {
+    try {
+      Class<?> module;
+
+      // Attempt to load the classes via the context class loader first, in order to support
+      // environments that enforce tighter constraints on class loading (such as in an OSGi container)
+      ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+      if(classLoader != null) {
+        module = classLoader.loadClass(name);
+      } else {
+        module = Class.forName(name);
+      }
+
+      return JerseyModule.class.isAssignableFrom(module);
+    } catch (ClassNotFoundException err) {
+      // Some modules may not be able to be instantiated directly here as a class if we're running
+      // in a container that enforcer tighter class loader constraints (such as the
+      // org.ops4j.peaberry.osgi.OSGiModule Guice module when running in an OSGi container),
+      // so we're only logging a warning here instead of throwing a hard exception
+      if (LOG.isWarnEnabled()) {
+        LOG.warn("Unavailable to load class in order to validate module: name={}", name);
+      }
+      return false;
+    }
   }
 
   private static void set(Field field, Object instance, Object value) throws  IllegalAccessException, NoSuchFieldException, SecurityException {

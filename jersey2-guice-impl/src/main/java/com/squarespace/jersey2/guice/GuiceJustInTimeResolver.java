@@ -48,6 +48,12 @@ class GuiceJustInTimeResolver implements JustInTimeInjectionResolver {
   @Override
   public boolean justInTimeResolution(Injectee injectee) {
     Type type = injectee.getRequiredType();
+
+    // Lookups that bypass GuiceServiceLocator's public methods land here first.
+    if (locator instanceof GuiceServiceLocator && ((GuiceServiceLocator)locator).bindFor(type)) {
+      return true;
+    }
+
     Class<?> clazz = MoreTypes.getRawType(type);
     
     if (clazz != null) {
