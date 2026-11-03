@@ -325,7 +325,7 @@ public class JerseyGuiceUtils {
     for (Binder binder : binders) {
       if (binder instanceof GuiceBinder<?>) {
         String name = ((GuiceBinder<?>)binder).getRawTypeName();
-        if (locator instanceof GuiceServiceLocator && !isBoundEagerly(name)) {
+        if (locator instanceof GuiceServiceLocator && !Boolean.getBoolean("jersey2guice.eager") && !isBoundEagerly(name)) {
           lazy.computeIfAbsent(name, k -> new ArrayList<>()).add(binder);
         } else {
           binder.bind(dc);
