@@ -17,6 +17,7 @@
 package com.squarespace.jersey2.guice;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertSame;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.expectThrows;
@@ -29,10 +30,15 @@ import java.util.stream.Collectors;
 import javax.inject.Inject;
 
 import org.glassfish.hk2.api.ActiveDescriptor;
+import org.glassfish.hk2.api.DynamicConfiguration;
+import org.glassfish.hk2.api.DynamicConfigurationService;
 import org.glassfish.hk2.api.IterableProvider;
+import org.glassfish.hk2.api.MultiException;
 import org.glassfish.hk2.api.ServiceLocator;
 import org.glassfish.hk2.utilities.BuilderHelper;
 import org.glassfish.hk2.utilities.ServiceLocatorUtilities;
+import org.jvnet.hk2.internal.DynamicConfigurationImpl;
+import org.jvnet.hk2.internal.ServiceLocatorImpl;
 import org.testng.annotations.Test;
 
 import com.google.inject.AbstractModule;
@@ -146,9 +152,35 @@ public class LazyBindingTest {
   }
 
   @Test
-  public void laterDescriptorOfAPendingTypeFailsTheLookup() {
+  public void laterDescriptorOfAPendingTypeDoesNotTakePrecedence() {
     ServiceLocator locator = link();
     ServiceLocatorUtilities.addOneConstant(locator, GUICE_GREETER, null, Greeter.class);
+    assertSame(locator.getService(Greeter.class).getClass(), Named.class);
+  }
+
+  @Test
+  public void laterDescriptorAddedAroundTheLocatorFailsTheLookup() {
+    ServiceLocator locator = link();
+    DynamicConfiguration dc = new DynamicConfigurationImpl((ServiceLocatorImpl)locator);
+    dc.addActiveDescriptor(BuilderHelper.createConstantDescriptor(GUICE_GREETER, null, Greeter.class));
+    dc.commit();
     expectThrows(IllegalStateException.class, () -> locator.getService(Greeter.class));
+  }
+
+  @Test
+  public void idempotentCommitRegistersOnlyItsFiltersContracts() {
+    ServiceLocator locator = link();
+    ServiceLocatorUtilities.enablePerThreadScope(locator);
+    assertFalse(registered(locator, Plugin.class));
+    assertFalse(registered(locator, Unrelated.class));
+  }
+
+  @Test
+  public void idempotentCommitStillSeesPendingDuplicates() {
+    ServiceLocator locator = link();
+    DynamicConfiguration dc = locator.getService(DynamicConfigurationService.class).createDynamicConfiguration();
+    dc.addIdempotentFilter(BuilderHelper.createContractFilter(Plugin.class.getName()));
+    expectThrows(MultiException.class, dc::commit);
+    assertFalse(registered(locator, Unrelated.class));
   }
 }

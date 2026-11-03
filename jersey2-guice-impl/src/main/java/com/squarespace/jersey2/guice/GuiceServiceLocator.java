@@ -18,24 +18,31 @@ package com.squarespace.jersey2.guice;
 
 import java.lang.annotation.Annotation;
 import java.lang.invoke.MethodType;
+import java.lang.reflect.Field;
 import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.glassfish.hk2.api.ActiveDescriptor;
+import org.glassfish.hk2.api.Descriptor;
 import org.glassfish.hk2.api.DynamicConfiguration;
+import org.glassfish.hk2.api.DynamicConfigurationService;
+import org.glassfish.hk2.api.FactoryDescriptors;
 import org.glassfish.hk2.api.Filter;
 import org.glassfish.hk2.api.IndexedFilter;
 import org.glassfish.hk2.api.Injectee;
 import org.glassfish.hk2.api.MultiException;
+import org.glassfish.hk2.api.Populator;
 import org.glassfish.hk2.api.ServiceHandle;
 import org.glassfish.hk2.api.ServiceLocator;
 import org.glassfish.hk2.utilities.Binder;
@@ -55,10 +62,16 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
 
   private final ConcurrentMap<String, List<Binder>> pending = new ConcurrentHashMap<>();
 
-  private final Object lock = new Object();
+  // HK2 looks services up while holding its write lock, so registering under any other
+  // lock could deadlock against it.
+  private final ReentrantReadWriteLock lock = hk2Lock(this);
 
   // Guarded by lock. Commits look up HK2 SPI types, which are never pending.
   private final Set<String> binding = new HashSet<>();
+
+  private final ThreadLocal<Boolean> idempotentScan = new ThreadLocal<>();
+
+  private volatile DynamicConfigurationService configurationService;
 
   private volatile long linkedServiceId;
 
@@ -131,7 +144,8 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
       return false;
     }
 
-    synchronized (lock) {
+    lock(name);
+    try {
       List<Binder> binders = pending.get(name);
       if (binders == null || !binding.add(name)) {
         return false;
@@ -145,6 +159,8 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
       } finally {
         binding.remove(name);
       }
+    } finally {
+      lock.writeLock().unlock();
     }
   }
 
@@ -153,7 +169,8 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
       return;
     }
 
-    synchronized (lock) {
+    lock("every type");
+    try {
       List<String> names = new ArrayList<>(pending.keySet());
       names.removeAll(binding);
       if (names.isEmpty()) {
@@ -175,6 +192,29 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
       } finally {
         binding.removeAll(names);
       }
+    } finally {
+      lock.writeLock().unlock();
+    }
+  }
+
+  /**
+   * A read lock can't be upgraded, so waiting for the write lock under one would hang.
+   */
+  private void lock(String name) {
+    if (lock.getReadHoldCount() > 0) {
+      throw new IllegalStateException("Can't register the Guice bindings of " + name
+          + " in HK2 while this thread holds HK2's read lock");
+    }
+    lock.writeLock().lock();
+  }
+
+  private static ReentrantReadWriteLock hk2Lock(ServiceLocatorImpl locator) {
+    try {
+      Field field = ServiceLocatorImpl.class.getDeclaredField("readWriteLock");
+      field.setAccessible(true);
+      return (ReentrantReadWriteLock)field.get(locator);
+    } catch (ReflectiveOperationException err) {
+      throw new IllegalStateException("Unsupported HK2 version", err);
     }
   }
 
@@ -205,7 +245,7 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
   }
 
   private void bindFor(Filter filter) {
-    if (filter instanceof IndexedFilter && ((IndexedFilter)filter).getAdvertisedContract() != null) {
+    if (isIndexed(filter)) {
       bindFor(((IndexedFilter)filter).getAdvertisedContract());
     } else {
       bindAll();
@@ -218,8 +258,106 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
     super.shutdown();
   }
 
+  private static boolean isIndexed(Filter filter) {
+    return filter instanceof IndexedFilter && ((IndexedFilter)filter).getAdvertisedContract() != null;
+  }
+
+  /**
+   * Registers pending Guice bindings of a descriptor's contracts before HK2 gives the
+   * descriptor its service id, so they keep precedence over it. A commit with idempotent
+   * filters scans every descriptor for duplicates, but only the filters' contracts can
+   * match, so only those are registered for that scan.
+   */
+  private final class Configuration extends DynamicConfigurationImpl {
+
+    private final List<Filter> idempotentFilters = new ArrayList<>();
+
+    Configuration() {
+      super(GuiceServiceLocator.this);
+    }
+
+    @Override
+    public <T> ActiveDescriptor<T> bind(Descriptor key, boolean requiresDeepCopy) {
+      bindContracts(key);
+      return super.bind(key, requiresDeepCopy);
+    }
+
+    @Override
+    public FactoryDescriptors bind(FactoryDescriptors factoryDescriptors, boolean requiresDeepCopy) {
+      if (factoryDescriptors != null) {
+        bindContracts(factoryDescriptors.getFactoryAsAService());
+        bindContracts(factoryDescriptors.getFactoryAsAFactory());
+      }
+      return super.bind(factoryDescriptors, requiresDeepCopy);
+    }
+
+    @Override
+    public <T> ActiveDescriptor<T> addActiveDescriptor(ActiveDescriptor<T> activeDescriptor, boolean requiresDeepCopy) {
+      bindContracts(activeDescriptor);
+      return super.addActiveDescriptor(activeDescriptor, requiresDeepCopy);
+    }
+
+    private void bindContracts(Descriptor descriptor) {
+      if (descriptor != null && descriptor.getAdvertisedContracts() != null) {
+        for (String contract : descriptor.getAdvertisedContracts()) {
+          bindFor(contract);
+        }
+      }
+    }
+
+    @Override
+    public void addIdempotentFilter(Filter... filters) {
+      super.addIdempotentFilter(filters);
+      Collections.addAll(idempotentFilters, filters);
+    }
+
+    @Override
+    public void commit() {
+      if (idempotentFilters.isEmpty()) {
+        super.commit();
+        return;
+      }
+
+      for (Filter filter : idempotentFilters) {
+        bindFor(filter);
+      }
+
+      idempotentScan.set(Boolean.TRUE);
+      try {
+        super.commit();
+      } finally {
+        idempotentScan.remove();
+      }
+    }
+  }
+
+  private final class ConfigurationService implements DynamicConfigurationService {
+
+    private final DynamicConfigurationService delegate;
+
+    ConfigurationService(DynamicConfigurationService delegate) {
+      this.delegate = delegate;
+    }
+
+    @Override
+    public DynamicConfiguration createDynamicConfiguration() {
+      return new Configuration();
+    }
+
+    @Override
+    public Populator getPopulator() {
+      return delegate.getPopulator();
+    }
+  }
+
   @Override
   public List<ActiveDescriptor<?>> getDescriptors(Filter filter) {
+    // HK2's duplicate scan is the first lookup that isn't by type in a commit.
+    if (!isIndexed(filter) && idempotentScan.get() != null) {
+      idempotentScan.remove();
+      return super.getDescriptors(filter);
+    }
+
     bindFor(filter);
     return super.getDescriptors(filter);
   }
@@ -238,14 +376,23 @@ class GuiceServiceLocator extends ServiceLocatorImpl {
 
   @Override
   public <T> T getService(Class<T> contractOrImpl, Annotation... qualifiers) throws MultiException {
-    bindFor(contractOrImpl);
-    return super.getService(contractOrImpl, qualifiers);
+    return getService((Type)contractOrImpl, qualifiers);
   }
 
+  @SuppressWarnings("unchecked")
   @Override
   public <T> T getService(Type contractOrImpl, Annotation... qualifiers) throws MultiException {
     bindFor(contractOrImpl);
-    return super.getService(contractOrImpl, qualifiers);
+    T service = super.getService(contractOrImpl, qualifiers);
+    if (contractOrImpl == DynamicConfigurationService.class && qualifiers.length == 0 && service != null) {
+      DynamicConfigurationService wrapper = configurationService;
+      if (wrapper == null) {
+        wrapper = new ConfigurationService((DynamicConfigurationService)service);
+        configurationService = wrapper;
+      }
+      return (T)wrapper;
+    }
+    return service;
   }
 
   @Override
