@@ -114,7 +114,7 @@ class BindingUtils {
    * @see Injectee#isOptional()
    * @see Nullable
    * @see com.google.inject.Inject#optional()
-   * @see Nullability#allowsNull(Annotation[])
+   * @see Nullability#hasNullableAnnotation(Annotation[])
    */
   public static boolean isNullable(Injectee injectee) {
     // HK2's optional
@@ -132,15 +132,15 @@ class BindingUtils {
     int position = injectee.getPosition();
     
     if (element instanceof Field) {
-      return Nullability.allowsNull(((Field)element).getAnnotations());
+      return Nullability.hasNullableAnnotation(((Field)element).getAnnotations());
       
     } else if (element instanceof Method) {
       Annotation annotations[][] = ((Method)element).getParameterAnnotations();
-      return Nullability.allowsNull(annotations[position]);
+      return Nullability.hasNullableAnnotation(annotations[position]);
       
     } else if (element instanceof Constructor<?>) {
       Annotation annotations[][] = ((Constructor<?>)element).getParameterAnnotations();
-      return Nullability.allowsNull(annotations[position]);
+      return Nullability.hasNullableAnnotation(annotations[position]);
     }
     
     return false;
